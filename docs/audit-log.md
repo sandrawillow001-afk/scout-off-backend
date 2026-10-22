@@ -79,6 +79,34 @@ The following actions are automatically logged:
 | `player_anonymized` | `POST /api/admin/players/{playerId}/anonymize` | Player PII removed; includes anonymization timestamp |
 | `reindex_triggered` | `POST /api/admin/reindex` | On-chain event reindexing started |
 
+### Sensitive read events (#1531)
+
+Successful (2xx) reads of sensitive data are recorded as `read:<action>` by the
+`auditRead()` middleware (`src/middleware/auditRead.ts`). Entries contain the
+actor, role, target, correlation id, method, path and client IP — never the
+response body, query string or decrypted content. 4xx/5xx responses are not
+recorded, and the write is best-effort so auditing can never fail a request.
+
+| Action | Endpoint | Target |
+|--------|----------|--------|
+| `read:admin_audit_log` | `GET /api/admin/audit` | — |
+| `read:admin_audit_trail` | `GET /api/admin/audit/trail` | — |
+| `read:admin_events_export` | `GET /api/admin/events/export` | — |
+| `read:webhook_dead_letters` | `GET /api/admin/webhooks/dead-letters` | — |
+| `read:webhook_deliveries` | `GET /api/admin/webhooks/:id/deliveries` | webhook id |
+| `read:ip_reputation` | `GET /api/admin/ip-reputation/:ip` | IP address |
+| `read:token_introspection` | `POST /api/admin/introspect` | — |
+| `read:scout_note` | `GET /api/scouts/:wallet/notes/:playerId` | wallet/player id |
+| `read:scout_notes` | `GET /api/scouts/:wallet/notes` | wallet |
+| `read:scout_player_notes` | `GET /api/scouts/:wallet/players/:playerId/notes` | wallet/player id |
+| `read:scout_api_keys` | `GET /api/scouts/:wallet/api-keys` | wallet |
+
+Read auditing is controlled by `AUDIT_READS_ENABLED` (default: `true` in
+production, `false` elsewhere). Because the entries join the same hash chain as
+mutations and auth events, `GET /api/admin/audit/verify` covers them too. Use
+the existing `?action=` filter on `GET /api/admin/audit` to include or exclude
+`read:*` entries.
+
 ## Hash Chain Construction
 
 ### Deterministic hashing

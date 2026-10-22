@@ -41,6 +41,7 @@ import { setIpReputationController, getIpReputationController, setIpReputationSc
 import { triggerReindex, reindexStatusHandler, reindexBodySchema, reindexBodyShapeSchema, cancelReindexHandler } from '../controllers/reindexController';
 import { triggerReplay, replayStatusHandler, replayBodySchema, replayBodyShapeSchema } from '../controllers/replayController';
 import { requireRole } from '../middleware/auth';
+import { auditRead } from '../middleware/auditRead';
 import { idempotency } from '../middleware/idempotency';
 import { ipAllowlistMiddleware } from '../middleware/ipAllowlist';
 import { methodNotAllowed } from '../middleware/methodNotAllowed';
@@ -108,7 +109,12 @@ router.route('/events')
  * @auth Bearer (admin role required)
  */
 router.route('/events/export')
-  .get(createTimeout(120_000), requireRole('admin'), exportEvents)
+  .get(
+    createTimeout(120_000),
+    requireRole('admin'),
+    auditRead('admin_events_export'),
+    exportEvents,
+  )
   .all(methodNotAllowed(['GET', 'HEAD']));
 
 /**
@@ -174,7 +180,7 @@ router.route('/fees/withdraw')
  * @auth Bearer (admin role required)
  */
 router.route('/audit')
-  .get(requireRole('admin'), getAuditLog)
+  .get(requireRole('admin'), auditRead('admin_audit_log'), getAuditLog)
   .all(methodNotAllowed(['GET', 'HEAD']));
 
 /**
@@ -191,7 +197,7 @@ router.route('/audit')
  * @auth Bearer (admin role required)
  */
 router.route('/audit/trail')
-  .get(requireRole('admin'), getAuditTrail)
+  .get(requireRole('admin'), auditRead('admin_audit_trail'), getAuditTrail)
   .all(methodNotAllowed(['GET', 'HEAD']));
 
 /**
@@ -408,7 +414,12 @@ router.route('/contract/unpause')
  * @auth Bearer (admin role required)
  */
 router.route('/introspect')
-  .post(requireRole('admin'), validateBody(ignoredBodySchema), introspectToken)
+  .post(
+    requireRole('admin'),
+    auditRead('token_introspection'),
+    validateBody(ignoredBodySchema),
+    introspectToken,
+  )
   .all(methodNotAllowed(['POST']));
 
 /**
@@ -678,7 +689,11 @@ router.route('/events/replay/status')
  * @auth Bearer (admin role required)
  */
 router.route('/webhooks/dead-letters')
-  .get(requireRole('admin'), listDeadLetters)
+  .get(
+    requireRole('admin'),
+    auditRead('webhook_dead_letters'),
+    listDeadLetters,
+  )
   .delete(requireRole('admin'), purgeOldDeadLetters)
   .all(methodNotAllowed(['GET', 'DELETE', 'HEAD']));
 
@@ -761,7 +776,11 @@ router.route('/ip-allowlist')
  * @auth Bearer (admin role required)
  */
 router.route('/ip-reputation/:ip')
-  .get(requireRole('admin'), getIpReputationController)
+  .get(
+    requireRole('admin'),
+    auditRead('ip_reputation', (req) => String(req.params.ip)),
+    getIpReputationController,
+  )
   .all(methodNotAllowed(['GET', 'HEAD']));
 
 /**
@@ -776,7 +795,12 @@ router.route('/ip-reputation/:ip')
  * @response 200 { success: true, data: WebhookDeliveryRow[], total, limit, offset }
  * @auth Bearer (admin role required)
  */
-router.get('/webhooks/:id/deliveries', requireRole('admin'), getWebhookDeliveriesEndpoint);
+router.get(
+  '/webhooks/:id/deliveries',
+  requireRole('admin'),
+  auditRead('webhook_deliveries', (req) => String(req.params.id)),
+  getWebhookDeliveriesEndpoint,
+);
 
 /**
  * GET /api/admin/webhooks/:id/summary
