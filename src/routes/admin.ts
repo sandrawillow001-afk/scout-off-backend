@@ -30,7 +30,12 @@ import {
 } from '../controllers/adminController';
 import { withdrawFeesSchema, withdrawFeesV2Schema } from '../controllers/adminFeesController';
 import { revokeTokenSchema } from '../controllers/adminTokenController';
-import { reindexSchema } from '../controllers/adminIndexerController';
+import {
+  reindexSchema,
+  listUnprocessed,
+  retryUnprocessed,
+  listUnprocessedQuerySchema,
+} from '../controllers/adminIndexerController';
 import { bulkValidatorImportSchema, updatePlatformFeeSchema } from '../controllers/adminActionsController';
 import { importPlayers, importPlayersBodySchema } from '../controllers/adminPlayerImportController';
 import { adminDeactivatePlayer, adminReactivatePlayer, deactivateBodySchema } from '../controllers/adminPlayerDeactivationController';
@@ -46,7 +51,7 @@ import { ipAllowlistMiddleware } from '../middleware/ipAllowlist';
 import { methodNotAllowed } from '../middleware/methodNotAllowed';
 import { rateLimit } from '../middleware/rateLimit';
 import { createTimeout } from '../middleware/timeout';
-import { validateBody, validateJsonBodyOrPassThrough } from '../middleware/validate';
+import { validateBody, validateJsonBodyOrPassThrough, validateQuery } from '../middleware/validate';
 import { validatorWalletSchema } from '../validators/admin';
 import { emptyBodySchema, ignoredBodySchema } from '../validators/emptyBody';
 import config from '../config';
@@ -444,6 +449,42 @@ router.route('/tokens/revoke')
  */
 router.route('/indexer/reindex')
   .post(requireRole('admin'), validateBody(reindexSchema), reindex)
+  .all(methodNotAllowed(['POST']));
+
+/**
+ * GET /api/admin/indexer/unprocessed
+ *
+ * Paginated list of contract events the indexer could not apply (unknown topic
+ * or decode failure), newest first. Each row carries the raw topic/value XDR
+ * needed to replay the event once the decoder is fixed.
+ *
+ * @summary List contract events the indexer could not apply.
+ * @query page {number} - 1-based page number (default 1)
+ * @query pageSize {number} - Page size, 1-100 (default 20)
+ * @query reason {unknown_type|decode_error} - Optional filter by failure reason
+ * @response 200 { success: true, data: UnprocessedEvent[], total, page, pageSize }
+ * @response 400 { success: false, error: string } - Invalid query parameters
+ * @auth Bearer (admin role required)
+ */
+router.route('/indexer/unprocessed')
+  .get(requireRole('admin'), validateQuery(listUnprocessedQuerySchema), listUnprocessed)
+  .all(methodNotAllowed(['GET', 'HEAD']));
+
+/**
+ * POST /api/admin/indexer/unprocessed/:id/retry
+ *
+ * Reruns the indexer's apply path for a stored unprocessed event after a
+ * decoder fix. On success the unprocessed row is removed; on failure it is
+ * kept and the failure detail is returned.
+ *
+ * @summary Replay a stored unprocessed event after a decoder fix.
+ * @param id {number} - Id of the stored unprocessed event
+ * @response 200 { success: true, data: { id, status, detail } }
+ * @response 404 { success: false, error: string } - Unknown id
+ * @auth Bearer (admin role required)
+ */
+router.route('/indexer/unprocessed/:id/retry')
+  .post(requireRole('admin'), retryUnprocessed)
   .all(methodNotAllowed(['POST']));
 
 /**

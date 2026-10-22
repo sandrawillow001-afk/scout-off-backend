@@ -1,5 +1,16 @@
 import { Request, Response, NextFunction } from 'express';
-import { metricsMiddleware, metricsStore, errorCountsStore, getMetrics, getErrorMetrics, isMetricsEnabled } from '../../src/middleware/metrics';
+import {
+  metricsMiddleware,
+  metricsStore,
+  errorCountsStore,
+  getMetrics,
+  getErrorMetrics,
+  isMetricsEnabled,
+  recordIndexerEvent,
+  getIndexerEventMetrics,
+  serializeMetrics,
+  resetMetrics,
+} from '../../src/middleware/metrics';
 
 function makeReqRes(path = '/test', method = 'GET', statusCode = 200) {
   const listeners: Record<string, () => void> = {};
@@ -202,5 +213,40 @@ describe('metricsMiddleware — unmatched route bucketing', () => {
     }
     // Each distinct matched route gets its own key
     expect(Object.keys(metricsStore)).toHaveLength(3);
+  });
+});
+
+// ─── scout_off_indexer_events_total (#1540) ───────────────────────────────────
+
+describe('scout_off_indexer_events_total counter', () => {
+  beforeEach(() => resetMetrics());
+
+  it('increments per type and outcome, and serialises both labels', () => {
+    recordIndexerEvent('player_registered', 'applied');
+    recordIndexerEvent('player_registered', 'applied');
+    recordIndexerEvent('brand_new_event', 'unknown_type');
+    recordIndexerEvent('player_registered', 'decode_error');
+
+    const snapshot = getIndexerEventMetrics();
+    expect(snapshot.player_registered.applied).toBe(2);
+    expect(snapshot.player_registered.decode_error).toBe(1);
+    expect(snapshot.brand_new_event.unknown_type).toBe(1);
+
+    const text = serializeMetrics();
+    expect(text).toContain(
+      'scout_off_indexer_events_total{type="player_registered",outcome="applied"} 2',
+    );
+    expect(text).toContain(
+      'scout_off_indexer_events_total{type="brand_new_event",outcome="unknown_type"} 1',
+    );
+    expect(text).toContain(
+      'scout_off_indexer_events_total{type="player_registered",outcome="decode_error"} 1',
+    );
+  });
+
+  it('is reset by resetMetrics()', () => {
+    recordIndexerEvent('x', 'unknown_type');
+    resetMetrics();
+    expect(getIndexerEventMetrics()).toEqual({});
   });
 });

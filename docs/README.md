@@ -19,6 +19,7 @@ not a directory listing.
 | [webhooks.md](webhooks.md) | Operator & subscriber | Outbound event webhooks: subscribing, HMAC signature verification, delivery/retry, the dead-letter queue, and admin replay |
 | [trace-correlation.md](trace-correlation.md) | Contributor | End-to-end correlation lifecycle across HTTP → Soroban tx → indexer → webhook/SSE (#1113) |
 | [event-ordering.md](event-ordering.md) | Contributor | Deterministic indexer event total order and co-transaction atomicity (#1111) |
+| [indexer-unprocessed-events.md](indexer-unprocessed-events.md) | Operator & contributor | How the indexer counts, stores, and replays contract events it cannot decode or recognise, plus the admin list/retry endpoints and cursor semantics (#1540) |
 
 ## Auth & Security
 

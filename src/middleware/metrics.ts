@@ -207,6 +207,38 @@ export function observeSorobanRpcLatency(operation: SorobanRpcOperation, duratio
   observeLabelledSeconds(sorobanRpcHistogram, operation, durationMs / 1000);
 }
 
+// ─── Indexer event outcome counters (#1540) ─────────────────────────────────
+
+/**
+ * Classification of how the indexer handled a single contract event.
+ *  - `applied`       — recognised event type, side effects ran (or no-op).
+ *  - `unknown_type`  — topic did not match any known `CONTRACT_EVENT_TYPES` entry.
+ *  - `decode_error`  — normalisation/decoding threw (unexpected value shape).
+ */
+export type IndexerEventOutcome = 'applied' | 'unknown_type' | 'decode_error';
+
+/** Nested store: `type` → `outcome` → count. */
+const indexerEventsStore: Record<string, Record<IndexerEventOutcome, number>> = {};
+
+function blankOutcomes(): Record<IndexerEventOutcome, number> {
+  return { applied: 0, unknown_type: 0, decode_error: 0 };
+}
+
+/** Increment `scout_off_indexer_events_total{type,outcome}` by one. */
+export function recordIndexerEvent(type: string, outcome: IndexerEventOutcome): void {
+  if (!indexerEventsStore[type]) indexerEventsStore[type] = blankOutcomes();
+  indexerEventsStore[type][outcome] += 1;
+}
+
+/** Snapshot of the nested indexer event counters. */
+export function getIndexerEventMetrics(): Record<string, Record<IndexerEventOutcome, number>> {
+  const out: Record<string, Record<IndexerEventOutcome, number>> = {};
+  for (const [type, outcomes] of Object.entries(indexerEventsStore)) {
+    out[type] = { ...outcomes };
+  }
+  return out;
+}
+
 // ─── Webhook delivery counters ────────────────────────────────────────────────
 
 export type WebhookDeliveryStatus = 'success' | 'failure' | 'dead_letter';
@@ -346,6 +378,9 @@ export function resetMetrics(): void {
   cacheCountsStore.evictions = 0;
   cacheInvalidationStore.total = 0;
   stuckPendingPinsCount = 0;
+  for (const key of Object.keys(indexerEventsStore)) {
+    delete indexerEventsStore[key];
+  }
   resetIpReputationCounters();
 }
 
@@ -603,6 +638,20 @@ export function serializeMetrics(extras: SerializeMetricsExtras = {}): string {
   lines.push('# HELP scout_off_tier_divergence_total Total number of player tier divergence events detected since process start');
   lines.push('# TYPE scout_off_tier_divergence_total counter');
   lines.push(`scout_off_tier_divergence_total ${getTierDivergenceForMetrics()}`);
+
+  // Indexer event outcomes (#1540) — labelled by event type and outcome.
+  // A sustained non-zero `unknown_type`/`decode_error` rate means a contract
+  // upgrade renamed or reshaped an event; those rows are parked in
+  // `indexer_unprocessed_events` for replay (see docs/indexer.md).
+  lines.push('# HELP scout_off_indexer_events_total Total number of contract events seen by the indexer, by type and outcome');
+  lines.push('# TYPE scout_off_indexer_events_total counter');
+  for (const [type, outcomes] of Object.entries(getIndexerEventMetrics())) {
+    for (const [outcome, count] of Object.entries(outcomes)) {
+      lines.push(
+        `scout_off_indexer_events_total{type="${escapeLabelValue(type)}",outcome="${escapeLabelValue(outcome)}"} ${count}`,
+      );
+    }
+  }
 
   return lines.join('\n') + '\n';
 }
