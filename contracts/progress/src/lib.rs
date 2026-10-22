@@ -205,7 +205,7 @@ impl ProgressContract {
     ///
     /// # Errors
     /// * [`Error::NotInitialized`] — Contract has not been initialized.
-    /// * [`Error::NotFound`] — Caller (`validator`) is not in the validator registry.
+    /// * [`Error::ValidatorNotRegistered`] — Caller (`validator`) is not in the validator registry.
     pub fn submit_milestone(
         env: Env,
         validator: Address,
@@ -221,13 +221,12 @@ impl ProgressContract {
         }
         validator.require_auth();
 
-        // InvalidValidator(4)
         if !env
             .storage()
             .instance()
             .has(&DataKey::Validator(validator.clone()))
         {
-            return Err(Error::NotFound);
+            return Err(Error::ValidatorNotRegistered);
         }
 
         let milestone_id: u64 = env
@@ -294,10 +293,10 @@ impl ProgressContract {
     ///
     /// # Errors
     /// * [`Error::NotInitialized`] — Contract has not been initialized.
-    /// * [`Error::NotFound`] — Caller (`validator`) is not in the validator registry.
-    /// * [`Error::InvalidInput`] — No milestone exists with the given `milestone_id`, or
-    ///   the milestone type is not `"identity"` or `"performance"`.
-    /// * [`Error::AlreadyVerified`] — The milestone has already been approved.
+    /// * [`Error::ValidatorNotRegistered`] — Caller (`validator`) is not in the validator registry.
+    /// * [`Error::MilestoneNotFound`] — No milestone exists with the given `milestone_id`.
+    /// * [`Error::InvalidInput`] — The milestone type is not `"identity"` or `"performance"`.
+    /// * [`Error::MilestoneAlreadyApproved`] — The milestone has already been approved.
     pub fn approve_milestone(env: Env, validator: Address, milestone_id: u64) -> Result<(), Error> {
         if !is_initialized(&env) {
             return Err(Error::NotInitialized);
@@ -307,25 +306,22 @@ impl ProgressContract {
         }
         validator.require_auth();
 
-        // InvalidValidator(4)
         if !env
             .storage()
             .instance()
             .has(&DataKey::Validator(validator.clone()))
         {
-            return Err(Error::NotFound);
+            return Err(Error::ValidatorNotRegistered);
         }
 
-        // MilestoneNotFound(5)
         let mut milestone: MilestoneData = env
             .storage()
             .instance()
             .get(&DataKey::Milestone(milestone_id))
-            .ok_or(Error::InvalidInput)?;
+            .ok_or(Error::MilestoneNotFound)?;
 
-        // AlreadyVerified(6)
         if milestone.approved {
-            return Err(Error::AlreadyVerified);
+            return Err(Error::MilestoneAlreadyApproved);
         }
 
         let new_level: u32 = if milestone.milestone_type == String::from_str(&env, "identity") {

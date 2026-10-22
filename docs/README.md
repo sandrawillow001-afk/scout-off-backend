@@ -34,6 +34,7 @@ not a directory listing.
 | Doc | Audience | Description |
 | --- | -------- | ----------- |
 | [data-model.md](data-model.md) | Contributor | All application tables, their purposes, and how they are populated (indexer, API writes, migrations) — consult this before writing queries |
+| [contract-errors.md](contract-errors.md) | Contributor & client | Soroban error discriminants, their backend `code`/HTTP status mapping, and how to add a variant without breaking the on-chain ABI |
 | [data-privacy.md](data-privacy.md) | Operator | GDPR right-to-erasure: what the backend can erase, and the immutable on-chain boundary |
 | [postgres-migration.md](postgres-migration.md) | Operator | Migrating a deployment from SQLite to PostgreSQL |
 | [tier-promotion.md](tier-promotion.md) | Contributor | How a player's progress tier (0–3) is derived from approved milestones |

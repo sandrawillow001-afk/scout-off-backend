@@ -346,7 +346,7 @@ impl SubscriptionContract {
     ///
     /// # Errors
     /// * [`Error::NotInitialized`] — Contract has not been initialized.
-    /// * [`Error::InvalidInput`] — `platform_fee_bps` exceeds 10000.
+    /// * [`Error::FeeBpsOutOfRange`] — `platform_fee_bps` exceeds 10000.
     /// * [`Error::Unauthorized`] — Caller is not the stored admin.
     pub fn set_platform_fee_bps(
         env: Env,
@@ -360,7 +360,7 @@ impl SubscriptionContract {
             return Err(Error::ContractPaused);
         }
         if platform_fee_bps > 10000 {
-            return Err(Error::InvalidInput);
+            return Err(Error::FeeBpsOutOfRange);
         }
         let stored_admin: Address = env
             .storage()
@@ -464,8 +464,9 @@ impl SubscriptionContract {
     /// # Errors
     /// * [`Error::NotInitialized`] — Contract has not been initialized.
     /// * [`Error::ContractPaused`] — Contract is paused.
-    /// * [`Error::NotSubscribed`] — Scout has no active subscription or it has
-    ///   already expired/been cancelled.
+    /// * [`Error::NotSubscribed`] — Scout has never subscribed.
+    /// * [`Error::SubscriptionExpired`] — Scout's subscription has expired or
+    ///   was already cancelled.
     pub fn cancel_subscription(env: Env, scout: Address) -> Result<(), Error> {
         if !is_initialized(&env) {
             return Err(Error::NotInitialized);
@@ -485,7 +486,7 @@ impl SubscriptionContract {
         // Reject if the subscription is already expired or previously cancelled
         // (expires_at == 0 is the sentinel we write below).
         if env.ledger().sequence() >= record.expires_at || record.expires_at == 0 {
-            return Err(Error::NotSubscribed);
+            return Err(Error::SubscriptionExpired);
         }
 
         // Mark as cancelled by setting expires_at to the current ledger (= expired now).

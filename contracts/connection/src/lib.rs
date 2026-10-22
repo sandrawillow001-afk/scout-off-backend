@@ -278,7 +278,7 @@ impl ConnectionContract {
         Ok(())
     }
 
-    /// Return the ConnectionRecord for (scout, player_id), or PlayerNotFound if none.
+    /// Return the ConnectionRecord for (scout, player_id), or ConnectionNotFound if none.
     pub fn get_connection(
         env: Env,
         scout: Address,
@@ -287,7 +287,7 @@ impl ConnectionContract {
         env.storage()
             .instance()
             .get(&DataKey::Connection(scout, player_id))
-            .ok_or(Error::PlayerNotFound)
+            .ok_or(Error::ConnectionNotFound)
     }
 
     /// Return all connection records for a scout.
@@ -341,15 +341,19 @@ impl ConnectionContract {
             (r, conn_key)
         } else if caller == stored_admin {
             // Admin path: scan all scout connections to find this player_id.
-            // Since we don't have a global index, return PlayerNotFound for now.
+            // Since we don't have a global index, return ConnectionNotFound for now.
             // In production, admin would pass the scout address explicitly.
-            return Err(Error::PlayerNotFound);
+            return Err(Error::ConnectionNotFound);
         } else {
-            return Err(Error::PlayerNotFound);
+            return Err(Error::ConnectionNotFound);
         };
 
         if record.scout != caller && caller != stored_admin {
             return Err(Error::Unauthorized);
+        }
+
+        if record.status == ConnectionStatus::Closed {
+            return Err(Error::ConnectionAlreadyClosed);
         }
 
         let mut updated = record;
