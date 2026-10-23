@@ -55,6 +55,13 @@ pub struct ProgressContract;
 
 #[contractimpl]
 impl ProgressContract {
+    /// Return the contract's semantic version as `(major, minor, patch)`.
+    ///
+    /// Read-only, auth-free. Used by the backend at startup for compatibility checks.
+    pub fn version(_env: Env) -> (u32, u32, u32) {
+        (0, 1, 0)
+    }
+
     /// One-time contract setup. Stores the admin address and the register contract address.
     ///
     /// # Arguments
@@ -810,5 +817,13 @@ mod tests {
             &String::from_str(&env, "ipfs://evidence"),
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn version_returns_semver_tuple() {
+        let env = Env::default();
+        let (client, _reg_client, _admin) = setup(&env);
+        let (major, _minor, _patch) = client.version();
+        assert_eq!(major, 0);
     }
 }

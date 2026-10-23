@@ -20,6 +20,41 @@ function getTierDivergenceForMetrics(): number {
   return _getTierDivergenceTotal();
 }
 
+// ── Audit chain verification (#1539) ─────────────────────────────────────────
+//
+// Kept here (rather than in the verifier service) so the values survive
+// between scheduled runs and are available even before the first run. The
+// gauge starts at 1 because no break has been observed yet; a failed run sets
+// it to 0 until a later run verifies cleanly again.
+
+let _auditChainValid = 1;
+let _auditChainBreaksTotal = 0;
+
+/** Records the outcome of the most recent audit chain verification run. */
+export function setAuditChainValid(valid: boolean): void {
+  _auditChainValid = valid ? 1 : 0;
+}
+
+/** Increments `scout_off_audit_chain_breaks_total` and invalidates the gauge. */
+export function recordAuditChainBreak(): void {
+  _auditChainBreaksTotal += 1;
+  _auditChainValid = 0;
+}
+
+/** Resets both audit chain metrics (used in tests). */
+export function resetAuditChainMetrics(): void {
+  _auditChainValid = 1;
+  _auditChainBreaksTotal = 0;
+}
+
+export function getAuditChainValid(): number {
+  return _auditChainValid;
+}
+
+export function getAuditChainBreaksTotal(): number {
+  return _auditChainBreaksTotal;
+}
+
 export interface RouteMetric {
   count: number;
   totalLatencyMs: number;
@@ -346,6 +381,10 @@ export function resetMetrics(): void {
   cacheCountsStore.evictions = 0;
   cacheInvalidationStore.total = 0;
   stuckPendingPinsCount = 0;
+  unhandledRejectionsTotal = 0;
+  Object.keys(rateLimitRejectedStore).forEach((k) => delete rateLimitRejectedStore[k]);
+  rateLimitStoreErrorsTotal = 0;
+  Object.keys(authFailuresStore).forEach((k) => delete authFailuresStore[k]);
   resetIpReputationCounters();
 }
 
@@ -413,6 +452,65 @@ export function recordCacheInvalidation(): void {
 /** Returns the current cache invalidation counter. */
 export function getCacheInvalidationTotal(): number {
   return cacheInvalidationStore.total;
+}
+
+// ─── Unhandled promise-rejection counter (#1570) ──────────────────────────────
+
+let unhandledRejectionsTotal = 0;
+
+/** Increment the unhandled-rejection counter. Called from src/index.ts. */
+export function incUnhandledRejections(): void {
+  unhandledRejectionsTotal++;
+}
+
+// ─── Rate-limit rejection counter (#1571) ─────────────────────────────────────
+
+/** Per-limiter rejection counts keyed by limiter namespace. */
+const rateLimitRejectedStore: Record<string, number> = {};
+
+/** Global counter for rate-limit store errors (fail-open path). */
+let rateLimitStoreErrorsTotal = 0;
+
+/**
+ * Increment the rate-limit rejection counter for the given limiter namespace.
+ * Namespace is a fixed string, so label cardinality is bounded.
+ */
+export function incRateLimitRejected(namespace: string): void {
+  rateLimitRejectedStore[namespace] = (rateLimitRejectedStore[namespace] ?? 0) + 1;
+}
+
+/** Increment the rate-limit store-error counter (fail-open path). */
+export function incRateLimitStoreError(): void {
+  rateLimitStoreErrorsTotal++;
+}
+
+// ─── Authentication-failure counter (#1572) ───────────────────────────────────
+
+/** Fixed set of valid auth-failure reason labels (bounded cardinality). */
+export const AUTH_FAILURE_REASONS = [
+  'missing_token',
+  'invalid_token',
+  'expired_token',
+  'revoked_token',
+  'forbidden_role',
+  'invalid_api_key',
+  'forbidden_scope',
+  'sep10_invalid',
+] as const;
+
+export type AuthFailureReason = (typeof AUTH_FAILURE_REASONS)[number];
+
+const authFailuresStore: Record<string, number> = {};
+
+/**
+ * Increment the auth-failure counter for the given reason.
+ * Unknown reasons are mapped to `other` to keep cardinality bounded.
+ */
+export function incAuthFailure(reason: string): void {
+  const validReason = (AUTH_FAILURE_REASONS as readonly string[]).includes(reason)
+    ? reason
+    : 'other';
+  authFailuresStore[validReason] = (authFailuresStore[validReason] ?? 0) + 1;
 }
 
 // ─── Fee withdrawal DB-write failure counter ──────────────────────────────────
@@ -603,6 +701,36 @@ export function serializeMetrics(extras: SerializeMetricsExtras = {}): string {
   lines.push('# HELP scout_off_tier_divergence_total Total number of player tier divergence events detected since process start');
   lines.push('# TYPE scout_off_tier_divergence_total counter');
   lines.push(`scout_off_tier_divergence_total ${getTierDivergenceForMetrics()}`);
+
+  // Audit chain verification (#1539). `scout_off_audit_chain_valid` is 1 when
+  // the most recent scheduled verification passed, 0 after a break is found.
+  lines.push('# HELP scout_off_audit_chain_valid Whether the last audit-log hash-chain verification passed (1) or found a break (0)');
+  lines.push('# TYPE scout_off_audit_chain_valid gauge');
+  lines.push(`scout_off_audit_chain_valid ${getAuditChainValid()}`);
+  lines.push('# HELP scout_off_audit_chain_breaks_total Total number of audit-log hash-chain breaks detected since process start');
+  lines.push('# TYPE scout_off_audit_chain_breaks_total counter');
+  lines.push(`scout_off_audit_chain_breaks_total ${getAuditChainBreaksTotal()}`);
+  // Unhandled promise-rejection counter (#1570).
+  lines.push('# HELP scout_off_unhandled_rejections_total Total number of unhandled promise rejections since process start');
+  lines.push('# TYPE scout_off_unhandled_rejections_total counter');
+  lines.push(`scout_off_unhandled_rejections_total ${unhandledRejectionsTotal}`);
+
+  // Rate-limit rejection counter (#1571).
+  lines.push('# HELP scout_off_rate_limit_rejected_total Total rate-limited (429) requests by limiter namespace');
+  lines.push('# TYPE scout_off_rate_limit_rejected_total counter');
+  for (const [limiter, count] of Object.entries(rateLimitRejectedStore)) {
+    lines.push(`scout_off_rate_limit_rejected_total{limiter="${escapeLabelValue(limiter)}"} ${count}`);
+  }
+  lines.push('# HELP scout_off_rate_limit_store_errors_total Total rate-limit store errors (fail-open path)');
+  lines.push('# TYPE scout_off_rate_limit_store_errors_total counter');
+  lines.push(`scout_off_rate_limit_store_errors_total ${rateLimitStoreErrorsTotal}`);
+
+  // Authentication-failure counter (#1572).
+  lines.push('# HELP scout_off_auth_failures_total Total authentication failures by reason');
+  lines.push('# TYPE scout_off_auth_failures_total counter');
+  for (const [reason, count] of Object.entries(authFailuresStore)) {
+    lines.push(`scout_off_auth_failures_total{reason="${escapeLabelValue(reason)}"} ${count}`);
+  }
 
   return lines.join('\n') + '\n';
 }

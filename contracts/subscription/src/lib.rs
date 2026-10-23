@@ -54,6 +54,13 @@ pub struct SubscriptionContract;
 
 #[contractimpl]
 impl SubscriptionContract {
+    /// Return the contract's semantic version as `(major, minor, patch)`.
+    ///
+    /// Read-only, auth-free. Used by the backend at startup for compatibility checks.
+    pub fn version(_env: Env) -> (u32, u32, u32) {
+        (0, 1, 0)
+    }
+
     /// One-time contract setup. Stores the admin, payment token, and platform fee config.
     pub fn initialize(
         env: Env,
@@ -986,5 +993,13 @@ mod tests {
                 .wrapping_mul(6364136223846793005)
                 .wrapping_add(1442695040888963407);
         }
+    }
+
+    #[test]
+    fn version_returns_semver_tuple() {
+        let env = Env::default();
+        let (client, _admin, _token_addr) = setup(&env);
+        let (major, _minor, _patch) = client.version();
+        assert_eq!(major, 0);
     }
 }

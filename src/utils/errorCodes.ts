@@ -62,6 +62,12 @@ export const ErrorCode = {
   RATE_LIMITED: 'RATE_LIMITED',
 
   /**
+   * HTTP 429 — The account has been temporarily locked after too many failed
+   * SEP-10 token exchanges. Client should wait for the `Retry-After` duration.
+   */
+  AUTH_LOCKED: 'AUTH_LOCKED',
+
+  /**
    * HTTP 415 — Request Content-Type is not supported (e.g., text/plain instead of application/json).
    * Client should: Set Content-Type: application/json in request headers.
    */
