@@ -13,7 +13,6 @@ import {
   insertOrUpdatePlayer,
   updatePlayerProgress,
   insertPendingMilestone,
-  queryEvents,
   getEventsCount,
   rollbackEventsFromLedger,
   insertUnprocessedEvent,
@@ -32,7 +31,7 @@ import {
   type NormalizedIndexerEvent,
 } from './eventOrdering';
 import { withRestoredCorrelation } from './txCorrelation';
-import { EventBroadcaster, broadcaster } from './eventBroadcaster';
+import { broadcaster } from './eventBroadcaster';
 
 const tracer = trace.getTracer('scout-off-backend');
 
@@ -41,21 +40,8 @@ function getCache() {
   return require('./cache');
 }
 
-// Track approved milestones for webhook dispatch
-const approvedMilestones: Array<{ type: string; payload: unknown }> = [];
-
 /** Current indexer lag in ledgers (latestChainLedger - lastIndexedLedger). Reset after each poll. */
 export let indexerLedgerLag = 0;
-
-/** Threshold in ledgers above which a warning is logged. Configurable via INDEXER_LAG_WARN_THRESHOLD. */
-function getLagWarnThreshold(): number {
-  return parseInt(process.env.INDEXER_LAG_WARN_THRESHOLD ?? '100', 10);
-}
-
-/** Configurable finality margin delays treating the most recent N ledgers as immutable. */
-function getFinalityMargin(): number {
-  return parseInt(process.env.INDEXER_FINALITY_MARGIN ?? '10', 10);
-}
 
 // ─── Payload normalisation ────────────────────────────────────────────────────
 //
@@ -341,13 +327,26 @@ export function normalizeEventId(
   return `${contractId}:${ledger}:${txHash}:${eventIndex}`;
 }
 
-// Stub hook — replace with real logic as needed (e.g. metrics, alerting).
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function onBeforeInsert(_eventId: string): void { /* hook */ }
-
-// Stub hook — called after a successful insert (INSERT OR IGNORE may be a no-op).
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function onAfterInsert(_eventId: string): void { /* hook */ }
+/**
+ * Indexer event hooks for test fault injection and observability.
+ *
+ * Usage (tests only):
+ *   import { __indexerHooks } from './indexer';
+ *   __indexerHooks.beforeInsert = (eventId) => {
+ *     if (shouldSimulateFailure) throw new Error('simulated crash');
+ *   };
+ *
+ * These hooks are called around every event insert to enable:
+ * - Fault injection (e.g., crash between insert and side effects)
+ * - Idempotent reprocessing verification
+ * - Metrics / alerting (future)
+ *
+ * @internal Test-only API; do not use in production.
+ */
+export const __indexerHooks = {
+  beforeInsert: (_eventId: string) => {},
+  afterInsert: (_eventId: string) => {},
+};
 
 // ─── Indexer ──────────────────────────────────────────────────────────────────
 
@@ -363,7 +362,7 @@ export async function indexEvents(): Promise<void> {
   );
 
   const lastIndexed = fetchLastIndexedLedger();
-  const margin = getFinalityMargin();
+  const margin = config.indexer.finalityMargin;
   const fromLedger = Math.max(0, lastIndexed > margin ? lastIndexed - margin : 0);
   span.setAttribute('indexer.ledger_start', fromLedger);
 
@@ -384,7 +383,7 @@ export async function indexEvents(): Promise<void> {
 
   const lagAfterPoll = Math.max(0, response.latestLedger - (lastIndexed > 0 ? lastIndexed - 1 : response.latestLedger));
   indexerLedgerLag = lagAfterPoll;
-  const threshold = getLagWarnThreshold();
+  const threshold = config.indexer.lagWarnThreshold;
   if (lagAfterPoll > threshold) {
     logger.warn(`[indexer] ledger lag=${lagAfterPoll} exceeds threshold=${threshold}`);
   }
@@ -512,7 +511,7 @@ export async function indexEvents(): Promise<void> {
     const createdAt = raw.ledgerClosedAt ? new Date(raw.ledgerClosedAt).getTime() : Date.now();
     const ledgerHash = raw.ledgerHash ?? raw.pagingToken ?? raw.txHash;
 
-    onBeforeInsert(eventId);
+    __indexerHooks.beforeInsert(eventId);
     const insertResult = insert.run(
       type,
       event.ledger,
@@ -526,7 +525,7 @@ export async function indexEvents(): Promise<void> {
     );
     const eventInserted = insertResult.changes > 0;
     if (!eventInserted) return outcome;
-    onAfterInsert(eventId);
+    __indexerHooks.afterInsert(eventId);
 
     // Known events are counted as applied once the raw row is persisted; the
     // type-specific side effects run below. Unknown events were already counted
